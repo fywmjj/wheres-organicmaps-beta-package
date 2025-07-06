@@ -1,0 +1,5 @@
+# 忽略所有被下载的 APK 文件
+*.apk
+
+# 忽略下载的 release notes 文件
+release_notes.txt

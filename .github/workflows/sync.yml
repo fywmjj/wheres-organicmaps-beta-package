@@ -1,0 +1,32 @@
+name: Sync Organic Maps Beta APK
+
+on:
+  # 每5分钟运行一次 (注意：对于免费计划，GitHub Actions 的运行频率可能会有延迟)
+  schedule:
+    - cron: '*/5 * * * *'
+  
+  # 允许手动从 Actions 页面触发此工作流，方便测试
+  workflow_dispatch:
+
+jobs:
+  sync_and_release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 步骤 1: 检出当前仓库代码，以便能访问 sync_beta.sh 脚本
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 步骤 2: 运行我们的同步脚本
+      - name: Fetch and Upload Latest Beta
+        # 为脚本添加可执行权限
+        run: chmod +x ./sync_beta.sh
+        # 执行脚本
+        shell: bash
+        run: ./sync_beta.sh
+        env:
+          # 使用我们自己仓库的拥有者/仓库名，例如 "your-username/wheres-organicmaps-beta-package"
+          REPO: ${{ github.repository }}
+          # 将我们在仓库 Secrets 中设置的 GH_PAT 作为 GitHub CLI 的认证 Token
+          # 这对于跨仓库读取 Actions 信息和在本仓库创建 Release 至关重要
+          GH_TOKEN: ${{ secrets.GH_PAT }}
