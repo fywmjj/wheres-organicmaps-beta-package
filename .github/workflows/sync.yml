@@ -1,31 +1,53 @@
+# 工作流的名称
 name: Sync Organic Maps Beta APK
 
+# 工作流的触发条件
 on:
-  # 每5分钟运行一次 (注意：对于免费计划，GitHub Actions 的运行频率可能会有延迟)
+  # 1. 定时触发：使用 cron 语法，表示每 5 分钟运行一次。
+  # 注意：GitHub Actions 对免费账户的定时任务可能会有延迟。
   schedule:
     - cron: '*/5 * * * *'
   
-  # 允许手动从 Actions 页面触发此工作流，方便测试
+  # 2. 手动触发：允许您在 GitHub 仓库的 "Actions" 页面手动点击按钮来运行此工作流。
+  # 这对于初次设置和调试非常有用。
   workflow_dispatch:
 
+# 定义工作流中的任务
 jobs:
+  # 任务的唯一 ID
   sync_and_release:
+    # 指定运行此任务的虚拟机环境
     runs-on: ubuntu-latest
     
+    # 定义任务中的步骤
     steps:
-      # 步骤 1: 检出当前仓库代码，以便能访问 sync_beta.sh 脚本
+      # 步骤 1: 检出仓库代码
+      # "uses" 关键字表示使用一个预先构建好的 Action。
+      # actions/checkout@v4 会将您仓库的最新代码下载到虚拟机中，
+      # 这样我们才能访问到 sync_beta.sh 脚本。
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 步骤 2: 运行我们的同步脚本
+      # 步骤 2: 运行同步脚本来获取并发布 APK
+      # 这是工作流的核心步骤。
       - name: Fetch and Upload Latest Beta
+        # 设置在此步骤中可用的环境变量
         env:
-          # 使用我们自己仓库的拥有者/仓库名
+          # REPO 变量被设置为当前仓库的名称（例如 "your-username/wheres-organicmaps-beta-package"）。
+          # 我们的脚本会使用这个变量来确定在哪里创建 Release。
           REPO: ${{ github.repository }}
-          # 将我们在仓库 Secrets 中设置的 GH_PAT 作为 GitHub CLI 的认证 Token
+          # GH_TOKEN 是 GitHub CLI 用来进行身份验证的令牌。
+          # 我们将其值设置为您在仓库 Secrets 中存储的 GH_PAT。
+          # 这是整个流程能正常工作的关键，它赋予了脚本读取其他仓库 Actions 和在您自己仓库创建 Release 的权限。
           GH_TOKEN: ${{ secrets.GH_PAT }}
+        # 指定运行 run 命令时使用的 shell
         shell: bash
+        # 【修正部分】
+        # 使用多行字符串语法 `|` 来在一个 `run` 块中执行多个命令。
+        # 这修复了之前 “'run' is already defined” 的错误。
         run: |
-          # 将多个命令放在一个 run 块中
+          echo "Setting execute permission for the script..."
           chmod +x ./sync_beta.sh
+          
+          echo "Executing the sync script..."
           ./sync_beta.sh
