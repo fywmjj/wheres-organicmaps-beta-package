@@ -12,33 +12,30 @@ REMOTE_REPO="organicmaps/organicmaps"
 WORKFLOW_FILE="android-beta.yaml"
 RELEASE_NOTES_URL="https://raw.githubusercontent.com/organicmaps/organicmaps/master/android/app/src/fdroid/play/listings/en-US/release-notes.txt"
 CURRENT_REPO="$REPO"
-# [新] Firebase 链接的有效期（秒），用于时间检查
-LINK_EXPIRATION_SECONDS=3600 # 1 hour
-# [新] Organic Maps Beta APK 在 Artifact 中的名称
+LINK_EXPIRATION_SECONDS=3600
 ARTIFACT_NAME="fdroid-beta"
 
 # --- 脚本临时文件 ---
 RELEASE_NOTES_FILENAME="release_notes.txt"
-# [新] 用于解压 Artifact 的临时目录
 ARTIFACT_DIR=$(mktemp -d)
 
-# 清理函数，确保无论脚本成功或失败，临时文件和目录都会被删除
+# 清理函数
 cleanup() {
   echo "INFO: Cleaning up temporary files and directories..."
   rm -f "${RELEASE_NOTES_FILENAME}"
-  # -rf 确保即使目录非空也能被删除
   rm -rf "${ARTIFACT_DIR}"
 }
-# 设置 trap，在脚本退出时（无论是正常退出、出错还是被中断）执行 cleanup 函数
 trap cleanup EXIT
 
-# 1. [MODIFIED] 获取最新的成功构建信息（ID 和更新时间）
+# 1. [MODIFIED & FIXED] 获取最新的成功构建信息
+#    【修正】使用 --limit 1 代替 | head -n 1 来避免 SIGPIPE (退出码 141) 错误。
 echo "INFO: Fetching the latest successful run from ${REMOTE_REPO}..."
-RUN_INFO=$(gh run list --repo "${REMOTE_REPO}" --workflow "${WORKFLOW_FILE}" --json databaseId,conclusion,updatedAt --jq '.[] | select(.conclusion=="success") | .' | head -n 1)
+RUN_INFO=$(gh run list --repo "${REMOTE_REPO}" --workflow "${WORKFLOW_FILE}" --limit 1 --json databaseId,conclusion,updatedAt --jq '.[] | select(.conclusion=="success")')
 
 if [ -z "$RUN_INFO" ]; then
-  echo "ERROR: Could not find any successful runs for workflow '${WORKFLOW_FILE}'. Exiting."
-  exit 1
+  # 这一行现在可能永远不会被触发，因为 --limit 1 会确保在找不到成功 run 时 RUN_INFO 为空，而不是命令失败
+  echo "INFO: No recent successful run found for workflow '${WORKFLOW_FILE}'. Nothing to do. Exiting."
+  exit 0
 fi
 
 LATEST_RUN_ID=$(echo "$RUN_INFO" | jq -r '.databaseId')
@@ -62,14 +59,13 @@ else
   echo "INFO: Release '${TAG_NAME}' does not exist. Proceeding..."
 fi
 
-# 4. [NEW] 核心逻辑：优先下载 Artifact，失败则回退到解析日志
-APK_FILE_PATH="" # 初始化 APK 文件路径变量
+# 4. 核心逻辑：优先下载 Artifact，失败则回退到解析日志
+APK_FILE_PATH=""
 
 echo "INFO: Attempting to download artifact '${ARTIFACT_NAME}' from run ${LATEST_RUN_ID}..."
 if gh run download "${LATEST_RUN_ID}" --repo "${REMOTE_REPO}" -n "${ARTIFACT_NAME}" -D "${ARTIFACT_DIR}"; then
   echo "INFO: Artifact downloaded successfully to temporary directory."
   
-  # 在解压目录中查找 APK 文件
   APK_FILE_PATH=$(find "${ARTIFACT_DIR}" -type f -name "OrganicMaps-*-beta.apk" | head -n 1)
   
   if [ -n "$APK_FILE_PATH" ]; then
@@ -79,11 +75,10 @@ if gh run download "${LATEST_RUN_ID}" --repo "${REMOTE_REPO}" -n "${ARTIFACT_NAM
   fi
 fi
 
-# 5. [NEW] 如果通过 Artifact 未能获得 APK，则回退到解析日志（并进行时间检查）
+# 5. 如果通过 Artifact 未能获得 APK，则回退到解析日志（并进行时间检查）
 if [ -z "$APK_FILE_PATH" ]; then
   echo "INFO: Fallback: Attempting to parse download link from log."
   
-  # 时间检查逻辑
   RUN_TIMESTAMP=$(date -d "${RUN_UPDATED_AT}" +%s)
   CURRENT_TIMESTAMP=$(date +%s)
   AGE_SECONDS=$((CURRENT_TIMESTAMP - RUN_TIMESTAMP))
@@ -91,10 +86,9 @@ if [ -z "$APK_FILE_PATH" ]; then
   echo "INFO: Run is ${AGE_SECONDS} seconds old."
   if [ "$AGE_SECONDS" -gt "$LINK_EXPIRATION_SECONDS" ]; then
     echo "WARNING: The latest successful run is older than 1 hour. The download link in the log has likely expired. Stopping execution to avoid creating an empty release."
-    exit 0 # 正常退出，这不是一个错误
+    exit 0
   fi
 
-  # 解析日志获取 URL
   echo "INFO: Downloading log for run ID ${LATEST_RUN_ID} to find the APK URL..."
   APK_URL=$(gh run view "${LATEST_RUN_ID}" --repo "${REMOTE_REPO}" --log | grep -o 'https://firebaseappdistribution.googleapis.com[^[:space:]]*' | head -n 1)
 
@@ -104,7 +98,6 @@ if [ -z "$APK_FILE_PATH" ]; then
   fi
   echo "INFO: Found APK download URL."
 
-  # 下载 APK 文件到临时目录
   TEMP_APK_FILENAME="${ARTIFACT_DIR}/organicmaps-beta.apk"
   echo "INFO: Downloading APK from Firebase..."
   curl --location --retry 3 --fail -o "${TEMP_APK_FILENAME}" "${APK_URL}"
@@ -124,7 +117,6 @@ gh release create "${TAG_NAME}" \
   --title "${RELEASE_TITLE}" \
   --notes-file "${RELEASE_NOTES_FILENAME}" \
   --latest \
-  "${APK_FILE_PATH}" # 使用变量引用 APK 路径
+  "${APK_FILE_PATH}"
 
 echo "SUCCESS: Release created and APK uploaded successfully!"
-# 清理工作将由 trap 自动执行
