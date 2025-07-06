@@ -27,8 +27,18 @@ jobs:
       # 这样我们才能访问到 sync_beta.sh 脚本。
       - name: Checkout repository
         uses: actions/checkout@v4
+      
+      # ... (在  - name: Fetch and Upload Latest Beta 前面增加)
 
-      # 步骤 2: 运行同步脚本来获取并发布 APK
+      - name: Debug GH CLI access
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          echo "Attempting to list runs from organicmaps/organicmaps..."
+          gh run list --repo "organicmaps/organicmaps" --limit 5
+          echo "Debug step finished."
+
+      # 步骤 3: 运行同步脚本来获取并发布 APK
       # 这是工作流的核心步骤。
       - name: Fetch and Upload Latest Beta
         # 设置在此步骤中可用的环境变量
