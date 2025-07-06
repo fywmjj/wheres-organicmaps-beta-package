@@ -9,14 +9,14 @@
 - **自动同步**: 每隔 5 分钟，自动检查 [Organic Maps 的 beta 构建流程](https://github.com/organicmaps/organicmaps/actions/workflows/android-beta.yaml)。
 - **获取最新版本**: 定位到最新一次成功的构建任务。
 - **解析下载链接**: 从构建日志中提取出临时的 Firebase APK 下载链接。
-- **永久存档**: 下载该 APK 文件，并将其上传到本项目的 **[Releases](https://github.com/YOUR_USERNAME/wheres-organicmaps-beta-package/releases)** 页面。
+- **永久存档**: 下载该 APK 文件，并将其上传到本项目的 **[Releases](https://github.com/fywmjj/wheres-organicmaps-beta-package/releases)** 页面。
 - **保持最新**: 新发布的 APK 会被标记为 "Latest"，确保你总能轻松找到最新版。
 
 ## 📥 如何使用？
 
-你不需要做任何事情！直接访问本项目的 **[Releases 页面](https://github.com/YOUR_USERNAME/wheres-organicmaps-beta-package/releases)** 即可查看并下载所有已存档的 beta 版本 APK。
+你不需要做任何事情！直接访问本项目的 **[Releases 页面](https://github.com/fywmjj/wheres-organicmaps-beta-package/releases)** 即可查看并下载所有已存档的 beta 版本 APK。
 
-[![Sync Beta APK](https://github.com/YOUR_USERNAME/wheres-organicmaps-beta-package/actions/workflows/sync.yml/badge.svg)](https://github.com/YOUR_USERNAME/wheres-organicmaps-beta-package/actions/workflows/sync.yml)
+[![Sync Beta APK](https://github.com/fywmjj/wheres-organicmaps-beta-package/actions/workflows/sync.yml/badge.svg)](https://github.com/YOUR_USERNAME/wheres-organicmaps-beta-package/actions/workflows/sync.yml)
 
 ## 🔧 如何自行部署 (For Developers)
 
