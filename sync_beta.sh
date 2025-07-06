@@ -19,8 +19,9 @@ APK_FILENAME="organicmaps-beta.apk"
 RELEASE_NOTES_FILENAME="release_notes.txt"
 
 # 1. 使用 GitHub CLI 获取 Organic Maps 仓库最新一次成功的 beta 构建任务的 ID
+#    【修正】我们现在检查 .conclusion 而不是 .status
 echo "INFO: Fetching the latest successful run ID from ${REMOTE_REPO}..."
-LATEST_RUN_ID=$(gh run list --repo "${REMOTE_REPO}" --workflow "${WORKFLOW_FILE}" --json databaseId,status --jq '.[] | select(.status=="success") | .databaseId' | head -n 1)
+LATEST_RUN_ID=$(gh run list --repo "${REMOTE_REPO}" --workflow "${WORKFLOW_FILE}" --json databaseId,conclusion --jq '.[] | select(.conclusion=="success") | .databaseId' | head -n 1)
 
 if [ -z "$LATEST_RUN_ID" ]; then
   echo "ERROR: Could not find any successful runs for workflow '${WORKFLOW_FILE}'. Exiting."
@@ -31,6 +32,8 @@ echo "INFO: Found latest successful run ID: ${LATEST_RUN_ID}"
 # 2. 根据运行 ID 获取其显示标题，并创建一个唯一的、URL友好的标签名
 RELEASE_TITLE=$(gh run view "${LATEST_RUN_ID}" --repo "${REMOTE_REPO}" --json displayTitle --jq '.displayTitle')
 TAG_NAME=$(echo "${RELEASE_TITLE}" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9]/-/g' -e 's/--\+/-/g' -e 's/^-//' -e 's/-$//')
+# 在标签名后增加一个唯一的run ID部分，防止因标题相同导致标签冲突
+TAG_NAME="${TAG_NAME}-${LATEST_RUN_ID}"
 
 echo "INFO: Generated release title: '${RELEASE_TITLE}'"
 echo "INFO: Generated tag name: '${TAG_NAME}'"
@@ -59,13 +62,12 @@ echo "INFO: Downloading APK from Firebase..."
 curl --location --retry 3 --output "${APK_FILENAME}" "${APK_URL}"
 echo "INFO: APK downloaded successfully as '${APK_FILENAME}'."
 
-# 6. 【新功能】下载官方的 Release Notes 文件
+# 6. 下载官方的 Release Notes 文件
 echo "INFO: Downloading official release notes from Organic Maps repository..."
 curl --silent --location --retry 3 --output "${RELEASE_NOTES_FILENAME}" "${RELEASE_NOTES_URL}"
 echo "INFO: Official release notes downloaded successfully as '${RELEASE_NOTES_FILENAME}'."
 
 # 7. 使用 GitHub CLI 在我们自己的仓库中创建新的 Release，并上传 APK
-#    使用 --notes-file 参数来指定包含发布说明的文件
 echo "INFO: Creating new release '${TAG_NAME}' and uploading the APK..."
 gh release create "${TAG_NAME}" \
   --repo "${CURRENT_REPO}" \
