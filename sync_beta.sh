@@ -11,8 +11,6 @@ WORKFLOW_FILE="android-beta.yaml"
 RELEASE_NOTES_URL="https://raw.githubusercontent.com/organicmaps/organicmaps/master/android/app/src/fdroid/play/listings/en-US/release-notes.txt"
 CURRENT_REPO="$REPO"
 LINK_EXPIRATION_SECONDS=3600
-
-# [NEW] 定义一个Artifact名称的优先列表。脚本会按顺序尝试它们。
 PREFERRED_ARTIFACT_NAMES=("fdroid-beta" "google-beta")
 
 # --- 脚本临时文件 ---
@@ -37,8 +35,8 @@ if [ -z "$RUN_INFO" ]; then
 fi
 
 LATEST_RUN_ID=$(echo "$RUN_INFO" | jq -r '.databaseId')
-RUN_UPDATED_AT=$(echo "$RUN_INFO" | jq -r '.updatedAt')
-echo "INFO: Found latest successful run ID: ${LATEST_RUN_ID}, completed at: ${RUN_UPDATED_AT}"
+RUN_UPDATED_at=$(echo "$RUN_INFO" | jq -r '.updatedAt')
+echo "INFO: Found latest successful run ID: ${LATEST_RUN_ID}, completed at: ${RUN_UPDATED_at}"
 
 # 2. 生成唯一的 Release 标签和标题
 RELEASE_TITLE=$(gh run view "${LATEST_RUN_ID}" --repo "${REMOTE_REPO}" --json displayTitle --jq '.displayTitle')
@@ -57,21 +55,24 @@ else
   echo "INFO: Release '${TAG_NAME}' does not exist. Proceeding..."
 fi
 
-# 4. 【核心改进】循环尝试下载优先列表中的 Artifact
+# 4. 循环尝试下载优先列表中的 Artifact
 APK_FILE_PATH=""
 for ARTIFACT_NAME in "${PREFERRED_ARTIFACT_NAMES[@]}"; do
     echo "INFO: Attempting to download artifact '${ARTIFACT_NAME}' from run ${LATEST_RUN_ID}..."
     
-    # 使用 if 来判断下载命令是否成功，避免因找不到artifact而导致脚本退出
     if gh run download "${LATEST_RUN_ID}" --repo "${REMOTE_REPO}" -n "${ARTIFACT_NAME}" -D "${ARTIFACT_DIR}"; then
-        echo "INFO: Artifact '${ARTIFACT_NAME}' downloaded successfully to temporary directory."
-        APK_FILE_PATH=$(find "${ARTIFACT_DIR}" -type f -name "OrganicMaps-*-beta.apk" | head -n 1)
+        echo "INFO: Artifact '${ARTIFACT_NAME}' downloaded successfully."
+        
+        # 【核心改进】使用正则表达式精确查找APK文件
+        #   模式: OrganicMaps-[8位数字]-[小写字母]-beta.apk
+        echo "INFO: Searching for APK with specific pattern inside the artifact..."
+        APK_FILE_PATH=$(find "${ARTIFACT_DIR}" -type f | grep -E '/OrganicMaps-[0-9]{8}-[a-z]+-beta\.apk$' | head -n 1)
         
         if [ -n "$APK_FILE_PATH" ]; then
-            echo "INFO: Found APK file in artifact: ${APK_FILE_PATH}"
+            echo "INFO: Found matching APK file: ${APK_FILE_PATH}"
             break # 成功找到APK，跳出循环
         else
-            echo "WARNING: Artifact '${ARTIFACT_NAME}' downloaded, but no APK file found inside. Trying next name..."
+            echo "WARNING: Artifact downloaded, but no APK matching the pattern was found. Trying next name..."
         fi
     else
         echo "INFO: Artifact '${ARTIFACT_NAME}' not found. Trying next name..."
@@ -82,13 +83,13 @@ done
 if [ -z "$APK_FILE_PATH" ]; then
     echo "INFO: No suitable artifact found. Falling back to parsing download link from log."
   
-    RUN_TIMESTAMP=$(date -d "${RUN_UPDATED_AT}" +%s)
+    RUN_TIMESTAMP=$(date -d "${RUN_UPDATED_at}" +%s)
     CURRENT_TIMESTAMP=$(date +%s)
     AGE_SECONDS=$((CURRENT_TIMESTAMP - RUN_TIMESTAMP))
 
     echo "INFO: Run is ${AGE_SECONDS} seconds old."
     if [ "$AGE_SECONDS" -gt "$LINK_EXPIRATION_SECONDS" ]; then
-        echo "WARNING: The latest successful run is older than 1 hour. The download link in the log has likely expired. Stopping execution to avoid creating an empty release."
+        echo "WARNING: Latest run is older than 1 hour. Log link expired. Stopping."
         exit 0
     fi
 
@@ -96,7 +97,7 @@ if [ -z "$APK_FILE_PATH" ]; then
     APK_URL=$(gh run view "${LATEST_RUN_ID}" --repo "${REMOTE_REPO}" --log | grep -o 'https://firebaseappdistribution.googleapis.com[^[:space:]]*' | head -n 1)
 
     if [ -z "$APK_URL" ]; then
-        echo "ERROR: Could not find the Firebase download URL in the log for run ${LATEST_RUN_ID}."
+        echo "ERROR: Could not find the Firebase download URL in the log."
         exit 1
     fi
     echo "INFO: Found APK download URL."
@@ -110,7 +111,7 @@ fi
 
 # 6. 下载官方的 Release Notes 文件
 echo "INFO: Downloading official release notes..."
-curl --silent --location --retry 3 -o "${RELEASE_NOTES_FILENAME}" "${RELEASE_NOTES_URL}"
+curl --silent --location --retry 3 -o "${RELEASE_NOTES_FILENAME}" "${URL_RELEASE_NOTES}"
 echo "INFO: Official release notes downloaded."
 
 # 7. 创建 Release 并上传最终找到的 APK 文件
