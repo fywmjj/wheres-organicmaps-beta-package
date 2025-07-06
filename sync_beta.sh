@@ -1,8 +1,6 @@
 #!/bin/bash
 
-# 如果任何命令失败，立即退出
 set -e
-# 管道中的任何命令失败，都视为整个管道失败
 set -o pipefail
 
 echo "INFO: Starting the sync process for Organic Maps beta..."
@@ -13,7 +11,9 @@ WORKFLOW_FILE="android-beta.yaml"
 RELEASE_NOTES_URL="https://raw.githubusercontent.com/organicmaps/organicmaps/master/android/app/src/fdroid/play/listings/en-US/release-notes.txt"
 CURRENT_REPO="$REPO"
 LINK_EXPIRATION_SECONDS=3600
-ARTIFACT_NAME="fdroid-beta"
+
+# [NEW] 定义一个Artifact名称的优先列表。脚本会按顺序尝试它们。
+PREFERRED_ARTIFACT_NAMES=("fdroid-beta" "google-beta")
 
 # --- 脚本临时文件 ---
 RELEASE_NOTES_FILENAME="release_notes.txt"
@@ -27,13 +27,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# 1. [MODIFIED & FIXED] 获取最新的成功构建信息
-#    【修正】使用 --limit 1 代替 | head -n 1 来避免 SIGPIPE (退出码 141) 错误。
+# 1. 获取最新的成功构建信息
 echo "INFO: Fetching the latest successful run from ${REMOTE_REPO}..."
 RUN_INFO=$(gh run list --repo "${REMOTE_REPO}" --workflow "${WORKFLOW_FILE}" --limit 1 --json databaseId,conclusion,updatedAt --jq '.[] | select(.conclusion=="success")')
 
 if [ -z "$RUN_INFO" ]; then
-  # 这一行现在可能永远不会被触发，因为 --limit 1 会确保在找不到成功 run 时 RUN_INFO 为空，而不是命令失败
   echo "INFO: No recent successful run found for workflow '${WORKFLOW_FILE}'. Nothing to do. Exiting."
   exit 0
 fi
@@ -59,50 +57,55 @@ else
   echo "INFO: Release '${TAG_NAME}' does not exist. Proceeding..."
 fi
 
-# 4. 核心逻辑：优先下载 Artifact，失败则回退到解析日志
+# 4. 【核心改进】循环尝试下载优先列表中的 Artifact
 APK_FILE_PATH=""
+for ARTIFACT_NAME in "${PREFERRED_ARTIFACT_NAMES[@]}"; do
+    echo "INFO: Attempting to download artifact '${ARTIFACT_NAME}' from run ${LATEST_RUN_ID}..."
+    
+    # 使用 if 来判断下载命令是否成功，避免因找不到artifact而导致脚本退出
+    if gh run download "${LATEST_RUN_ID}" --repo "${REMOTE_REPO}" -n "${ARTIFACT_NAME}" -D "${ARTIFACT_DIR}"; then
+        echo "INFO: Artifact '${ARTIFACT_NAME}' downloaded successfully to temporary directory."
+        APK_FILE_PATH=$(find "${ARTIFACT_DIR}" -type f -name "OrganicMaps-*-beta.apk" | head -n 1)
+        
+        if [ -n "$APK_FILE_PATH" ]; then
+            echo "INFO: Found APK file in artifact: ${APK_FILE_PATH}"
+            break # 成功找到APK，跳出循环
+        else
+            echo "WARNING: Artifact '${ARTIFACT_NAME}' downloaded, but no APK file found inside. Trying next name..."
+        fi
+    else
+        echo "INFO: Artifact '${ARTIFACT_NAME}' not found. Trying next name..."
+    fi
+done
 
-echo "INFO: Attempting to download artifact '${ARTIFACT_NAME}' from run ${LATEST_RUN_ID}..."
-if gh run download "${LATEST_RUN_ID}" --repo "${REMOTE_REPO}" -n "${ARTIFACT_NAME}" -D "${ARTIFACT_DIR}"; then
-  echo "INFO: Artifact downloaded successfully to temporary directory."
-  
-  APK_FILE_PATH=$(find "${ARTIFACT_DIR}" -type f -name "OrganicMaps-*-beta.apk" | head -n 1)
-  
-  if [ -n "$APK_FILE_PATH" ]; then
-    echo "INFO: Found APK file in artifact: ${APK_FILE_PATH}"
-  else
-    echo "WARNING: Artifact downloaded, but no APK file found inside. Will attempt fallback."
-  fi
-fi
-
-# 5. 如果通过 Artifact 未能获得 APK，则回退到解析日志（并进行时间检查）
+# 5. 如果循环结束后仍未找到 APK，则回退到解析日志（并进行时间检查）
 if [ -z "$APK_FILE_PATH" ]; then
-  echo "INFO: Fallback: Attempting to parse download link from log."
+    echo "INFO: No suitable artifact found. Falling back to parsing download link from log."
   
-  RUN_TIMESTAMP=$(date -d "${RUN_UPDATED_AT}" +%s)
-  CURRENT_TIMESTAMP=$(date +%s)
-  AGE_SECONDS=$((CURRENT_TIMESTAMP - RUN_TIMESTAMP))
+    RUN_TIMESTAMP=$(date -d "${RUN_UPDATED_AT}" +%s)
+    CURRENT_TIMESTAMP=$(date +%s)
+    AGE_SECONDS=$((CURRENT_TIMESTAMP - RUN_TIMESTAMP))
 
-  echo "INFO: Run is ${AGE_SECONDS} seconds old."
-  if [ "$AGE_SECONDS" -gt "$LINK_EXPIRATION_SECONDS" ]; then
-    echo "WARNING: The latest successful run is older than 1 hour. The download link in the log has likely expired. Stopping execution to avoid creating an empty release."
-    exit 0
-  fi
+    echo "INFO: Run is ${AGE_SECONDS} seconds old."
+    if [ "$AGE_SECONDS" -gt "$LINK_EXPIRATION_SECONDS" ]; then
+        echo "WARNING: The latest successful run is older than 1 hour. The download link in the log has likely expired. Stopping execution to avoid creating an empty release."
+        exit 0
+    fi
 
-  echo "INFO: Downloading log for run ID ${LATEST_RUN_ID} to find the APK URL..."
-  APK_URL=$(gh run view "${LATEST_RUN_ID}" --repo "${REMOTE_REPO}" --log | grep -o 'https://firebaseappdistribution.googleapis.com[^[:space:]]*' | head -n 1)
+    echo "INFO: Downloading log for run ID ${LATEST_RUN_ID} to find the APK URL..."
+    APK_URL=$(gh run view "${LATEST_RUN_ID}" --repo "${REMOTE_REPO}" --log | grep -o 'https://firebaseappdistribution.googleapis.com[^[:space:]]*' | head -n 1)
 
-  if [ -z "$APK_URL" ]; then
-    echo "ERROR: Could not find the Firebase download URL in the log for run ${LATEST_RUN_ID}."
-    exit 1
-  fi
-  echo "INFO: Found APK download URL."
+    if [ -z "$APK_URL" ]; then
+        echo "ERROR: Could not find the Firebase download URL in the log for run ${LATEST_RUN_ID}."
+        exit 1
+    fi
+    echo "INFO: Found APK download URL."
 
-  TEMP_APK_FILENAME="${ARTIFACT_DIR}/organicmaps-beta.apk"
-  echo "INFO: Downloading APK from Firebase..."
-  curl --location --retry 3 --fail -o "${TEMP_APK_FILENAME}" "${APK_URL}"
-  APK_FILE_PATH="${TEMP_APK_FILENAME}"
-  echo "INFO: APK downloaded successfully as '${APK_FILE_PATH}'."
+    TEMP_APK_FILENAME="${ARTIFACT_DIR}/organicmaps-beta.apk"
+    echo "INFO: Downloading APK from Firebase..."
+    curl --location --retry 3 --fail -o "${TEMP_APK_FILENAME}" "${APK_URL}"
+    APK_FILE_PATH="${TEMP_APK_FILENAME}"
+    echo "INFO: APK downloaded successfully as '${APK_FILE_PATH}'."
 fi
 
 # 6. 下载官方的 Release Notes 文件
