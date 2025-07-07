@@ -35,8 +35,8 @@ if [ -z "$RUN_INFO" ]; then
 fi
 
 LATEST_RUN_ID=$(echo "$RUN_INFO" | jq -r '.databaseId')
-RUN_UPDATED_at=$(echo "$RUN_INFO" | jq -r '.updatedAt')
-echo "INFO: Found latest successful run ID: ${LATEST_RUN_ID}, completed at: ${RUN_UPDATED_at}"
+RUN_UPDATED_AT=$(echo "$RUN_INFO" | jq -r '.updatedAt')
+echo "INFO: Found latest successful run ID: ${LATEST_RUN_ID}, completed at: ${RUN_UPDATED_AT}"
 
 # 2. 生成唯一的 Release 标签和标题
 RELEASE_TITLE=$(gh run view "${LATEST_RUN_ID}" --repo "${REMOTE_REPO}" --json displayTitle --jq '.displayTitle')
@@ -62,15 +62,12 @@ for ARTIFACT_NAME in "${PREFERRED_ARTIFACT_NAMES[@]}"; do
     
     if gh run download "${LATEST_RUN_ID}" --repo "${REMOTE_REPO}" -n "${ARTIFACT_NAME}" -D "${ARTIFACT_DIR}"; then
         echo "INFO: Artifact '${ARTIFACT_NAME}' downloaded successfully."
-        
-        # 【核心改进】使用正则表达式精确查找APK文件
-        #   模式: OrganicMaps-[8位数字]-[小写字母]-beta.apk
         echo "INFO: Searching for APK with specific pattern inside the artifact..."
         APK_FILE_PATH=$(find "${ARTIFACT_DIR}" -type f | grep -E '/OrganicMaps-[0-9]{8}-[a-z]+-beta\.apk$' | head -n 1)
         
         if [ -n "$APK_FILE_PATH" ]; then
             echo "INFO: Found matching APK file: ${APK_FILE_PATH}"
-            break # 成功找到APK，跳出循环
+            break
         else
             echo "WARNING: Artifact downloaded, but no APK matching the pattern was found. Trying next name..."
         fi
@@ -79,11 +76,11 @@ for ARTIFACT_NAME in "${PREFERRED_ARTIFACT_NAMES[@]}"; do
     fi
 done
 
-# 5. 如果循环结束后仍未找到 APK，则回退到解析日志（并进行时间检查）
+# 5. 如果循环结束后仍未找到 APK，则回退到解析日志
 if [ -z "$APK_FILE_PATH" ]; then
     echo "INFO: No suitable artifact found. Falling back to parsing download link from log."
   
-    RUN_TIMESTAMP=$(date -d "${RUN_UPDATED_at}" +%s)
+    RUN_TIMESTAMP=$(date -d "${RUN_UPDATED_AT}" +%s)
     CURRENT_TIMESTAMP=$(date +%s)
     AGE_SECONDS=$((CURRENT_TIMESTAMP - RUN_TIMESTAMP))
 
@@ -111,7 +108,8 @@ fi
 
 # 6. 下载官方的 Release Notes 文件
 echo "INFO: Downloading official release notes..."
-curl --silent --location --retry 3 -o "${RELEASE_NOTES_FILENAME}" "${URL_RELEASE_NOTES}"
+# 【修正】将 ${URL_RELEASE_NOTES} 改为正确的变量名 ${RELEASE_NOTES_URL}
+curl --silent --location --retry 3 -o "${RELEASE_NOTES_FILENAME}" "${RELEASE_NOTES_URL}"
 echo "INFO: Official release notes downloaded."
 
 # 7. 创建 Release 并上传最终找到的 APK 文件
